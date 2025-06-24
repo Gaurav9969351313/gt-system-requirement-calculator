@@ -1,0 +1,463 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>System Requirement Calculator - Final</title>
+  <link
+    href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css"
+    rel="stylesheet"
+  />
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+  <style>
+    pre {
+      background: #f8f9fa;
+      padding: 10px;
+      border-radius: 4px;
+      font-size: 0.9rem;
+      white-space: pre-wrap;
+    }
+  </style>
+</head>
+<body class="bg-light">
+  <div class="container py-4">
+    <h1 class="text-center mb-4">📐 System Requirement Calculator - Final</h1>
+
+    <!-- Formulas Table -->
+    <h4>🧮 Formulas Used</h4>
+    <table class="table table-bordered table-sm mb-4">
+      <thead class="table-light">
+        <tr>
+          <th>Parameter</th>
+          <th>Formula / Explanation</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr><td>Total RPS</td><td>(DAU * Requests/User/Day) / 86400</td></tr>
+        <tr><td>Read RPS</td><td>Total RPS * (Read/Write Ratio)</td></tr>
+        <tr><td>Write RPS</td><td>Total RPS * (1 - Read/Write Ratio)</td></tr>
+        <tr><td>Effective Read RPS (post-cache)</td><td>Read RPS * (1 - Cache Hit Ratio)</td></tr>
+        <tr><td>Servers Needed</td><td>ceil((Effective Read RPS + Write RPS) / Max RPS per Server)</td></tr>
+        <tr><td>Daily Data Ingest (MB)</td><td>DAU * Avg Object Size (MB)</td></tr>
+        <tr><td>Total Storage (GB)</td><td>(Daily Data * Retention Days) / 1024</td></tr>
+        <tr><td>Replicated Storage (GB)</td><td>Total Storage * Replication Factor</td></tr>
+        <tr><td>Storage with Redundancy (GB)</td><td>Replicated Storage * Redundancy Factor (e.g. N+1 = 1.1)</td></tr>
+        <tr><td>VMs with N+1 Redundancy</td><td>ceil(Servers Needed * Redundancy Factor)</td></tr>
+        <tr><td>HikariCP Pool Size</td><td>ceil(Max RPS per Server / (Avg DB Query Time in seconds))</td></tr>
+        <tr><td>AWS ECS Cluster Size</td><td>ceil(Total Containers / Containers per VM) considering resource constraints</td></tr>
+      </tbody>
+    </table>
+
+    <form id="calcForm">
+      <!-- Inputs -->
+      <h4>🔒 Storage Inputs</h4>
+      <div class="row mb-3">
+        <div class="col-md-4">
+          <label>Avg Object Size (MB)</label>
+          <input type="number" class="form-control" id="objectSize" value="1" min="0" step="0.01" />
+        </div>
+        <div class="col-md-4">
+          <label>Retention Period (Days)</label>
+          <input type="number" class="form-control" id="retention" value="30" min="1" />
+        </div>
+        <div class="col-md-4">
+          <label>Replication Factor</label>
+          <input type="number" class="form-control" id="replication" value="3" min="1" />
+        </div>
+      </div>
+
+      <h4>🌐 Network Inputs</h4>
+      <div class="row mb-3">
+        <div class="col-md-4">
+          <label>Avg Upload per User (MB)</label>
+          <input type="number" class="form-control" id="uploadPerUser" value="1" min="0" step="0.01" />
+        </div>
+      </div>
+
+      <h4>🧠 Memory Inputs</h4>
+      <div class="row mb-3">
+        <div class="col-md-4">
+          <label>Memory per Session/User (MB)</label>
+          <input type="number" class="form-control" id="memoryPerUser" value="5" min="0" />
+        </div>
+      </div>
+
+      <h4>🖥️ Compute Inputs</h4>
+      <div class="row mb-3">
+        <div class="col-md-3">
+          <label>Daily Active Users (DAU)</label>
+          <input type="number" class="form-control" id="dau" value="1000000" min="1" />
+        </div>
+        <div class="col-md-3">
+          <label>Requests/User/Day</label>
+          <input type="number" class="form-control" id="rpu" value="50" min="0" />
+        </div>
+        <div class="col-md-3">
+          <label>Read/Write Ratio (%)</label>
+          <input type="number" class="form-control" id="rwRatio" value="80" min="0" max="100" />
+        </div>
+        <div class="col-md-3">
+          <label>Max RPS/Server</label>
+          <input type="number" class="form-control" id="maxRpsPerServer" value="1000" min="1" />
+        </div>
+      </div>
+
+      <div class="row mb-3">
+        <div class="col-md-3">
+          <label>Cache Hit Ratio (%)</label>
+          <input type="number" class="form-control" id="cacheHitRatio" value="90" min="0" max="100" />
+        </div>
+        <div class="col-md-3">
+          <label>Cache Size (GB)</label>
+          <input type="number" class="form-control" id="cacheSize" value="100" min="0" />
+        </div>
+        <div class="col-md-3">
+          <label>Average DB Query Time (ms)</label>
+          <input type="number" class="form-control" id="avgDbQueryTime" value="10" min="1" />
+        </div>
+      </div>
+
+      <h4>🗃️ Database Inputs</h4>
+      <div class="row mb-4">
+        <div class="col-md-3">
+          <label>Database Type</label>
+          <select class="form-select" id="dbType">
+            <option value="SQL">SQL</option>
+            <option value="NoSQL">NoSQL</option>
+            <option value="Key-Value">Key-Value</option>
+            <option value="Time Series">Time Series</option>
+          </select>
+        </div>
+        <div class="col-md-3">
+          <label>Sharding Strategy</label>
+          <select class="form-select" id="shardStrategy">
+            <option value="Hash">Hash-based</option>
+            <option value="Range">Range-based</option>
+            <option value="Geo">Geographic</option>
+          </select>
+        </div>
+        <div class="col-md-3">
+          <label>Max DB Size per Shard (GB)</label>
+          <input type="number" class="form-control" id="maxShardSize" value="500" min="1" />
+        </div>
+      </div>
+
+      <h4>⚙️ High Availability & Reliability Inputs</h4>
+      <div class="row mb-4">
+        <div class="col-md-3">
+          <label>Availability Zones</label>
+          <input type="number" class="form-control" id="availabilityZones" value="3" min="1" />
+        </div>
+        <div class="col-md-3">
+          <label>Redundancy Factor (N+X)</label>
+          <input type="number" class="form-control" id="redundancyFactor" value="1.1" step="0.01" min="1" />
+        </div>
+        <div class="col-md-3">
+          <label>Backup Frequency (days)</label>
+          <input type="number" class="form-control" id="backupFrequency" value="1" min="1" />
+        </div>
+        <div class="col-md-3">
+          <label>Disaster Recovery RPO (hours)</label>
+          <input type="number" class="form-control" id="rpo" value="1" min="0" />
+        </div>
+      </div>
+
+      <h4>☁️ AWS ECS Inputs</h4>
+      <div class="row mb-4">
+        <div class="col-md-3">
+          <label>Containers per VM (max)</label>
+          <input type="number" class="form-control" id="containersPerVM" value="5" min="1" />
+        </div>
+        <div class="col-md-3">
+          <label>VM vCPU</label>
+          <input type="number" class="form-control" id="vmVcpu" value="4" min="1" />
+        </div>
+        <div class="col-md-3">
+          <label>VM RAM (GB)</label>
+          <input type="number" class="form-control" id="vmRam" value="16" min="1" />
+        </div>
+      </div>
+
+      <h4>🖥️ VM Inputs (Non-containerized)</h4>
+      <div class="row mb-4">
+        <div class="col-md-3">
+          <label>VM vCPU</label>
+          <input type="number" class="form-control" id="vmVcpuNonContainer" value="8" min="1" />
+        </div>
+        <div class="col-md-3">
+          <label>VM RAM (GB)</label>
+          <input type="number" class="form-control" id="vmRamNonContainer" value="32" min="1" />
+        </div>
+      </div>
+
+      <button type="button" class="btn btn-primary" onclick="calculate()">Calculate</button>
+      <button type="button" class="btn btn-secondary ms-2" onclick="downloadPdf()">Download PDF</button>
+      <button type="button" class="btn btn-success ms-2" onclick="downloadCsv()">Download as CSV</button>
+    </form>
+
+    <hr />
+
+    <!-- Results -->
+    <div id="pdfReport" class="bg-white p-3 rounded shadow-sm mt-4"></div>
+  </div>
+
+  <script>
+    function calculate() {
+      // Read inputs
+      const objectSize = parseFloat(document.getElementById("objectSize").value);
+      const retention = parseInt(document.getElementById("retention").value);
+      const replication = parseInt(document.getElementById("replication").value);
+
+      const uploadPerUser = parseFloat(document.getElementById("uploadPerUser").value);
+
+      const memoryPerUser = parseFloat(document.getElementById("memoryPerUser").value);
+
+      const dau = parseInt(document.getElementById("dau").value);
+      const rpu = parseFloat(document.getElementById("rpu").value);
+      const rwRatioPercent = parseFloat(document.getElementById("rwRatio").value);
+      const maxRpsPerServer = parseInt(document.getElementById("maxRpsPerServer").value);
+
+      const cacheHitRatioPercent = parseFloat(document.getElementById("cacheHitRatio").value);
+      const cacheSize = parseFloat(document.getElementById("cacheSize").value);
+
+      const avgDbQueryTime = parseFloat(document.getElementById("avgDbQueryTime").value);
+
+      const dbType = document.getElementById("dbType").value;
+      const shardStrategy = document.getElementById("shardStrategy").value;
+      const maxShardSize = parseInt(document.getElementById("maxShardSize").value);
+
+      const availabilityZones = parseInt(document.getElementById("availabilityZones").value);
+      const redundancyFactor = parseFloat(document.getElementById("redundancyFactor").value);
+      const backupFrequency = parseInt(document.getElementById("backupFrequency").value);
+      const rpo = parseInt(document.getElementById("rpo").value);
+
+      const containersPerVM = parseInt(document.getElementById("containersPerVM").value);
+      const vmVcpu = parseInt(document.getElementById("vmVcpu").value);
+      const vmRam = parseInt(document.getElementById("vmRam").value);
+
+      const vmVcpuNonContainer = parseInt(document.getElementById("vmVcpuNonContainer").value);
+      const vmRamNonContainer = parseInt(document.getElementById("vmRamNonContainer").value);
+
+      // --- Calculations ---
+
+      // 1. Total RPS
+      const totalRps = (dau * rpu) / 86400; // seconds in a day
+      const readRps = totalRps * (rwRatioPercent / 100);
+      const writeRps = totalRps * (1 - rwRatioPercent / 100);
+      const effectiveReadRps = readRps * (1 - cacheHitRatioPercent / 100);
+      const totalEffectiveRps = effectiveReadRps + writeRps;
+
+      // 2. Servers Needed (VMs) to handle traffic
+      const serversNeeded = Math.ceil(totalEffectiveRps / maxRpsPerServer);
+
+      // 3. VMs with redundancy factor (N+X)
+      const vmWithRedundancy = Math.ceil(serversNeeded * redundancyFactor);
+
+      // 4. Storage calculations
+      const dailyDataMB = dau * objectSize;
+      const totalStorageGB = (dailyDataMB * retention) / 1024;
+      const replicatedStorageGB = totalStorageGB * replication;
+      const storageWithRedundancy = replicatedStorageGB * redundancyFactor;
+
+      // 5. Network bandwidth (upload Mbps)
+      const bandwidthMbps = (uploadPerUser * dau * 8) / (24 * 3600); // bits/sec
+      const networkOverheadMbps = bandwidthMbps * 0.2; // 20% overhead
+      const totalNetworkMbps = bandwidthMbps + networkOverheadMbps;
+
+      // 6. Memory usage
+      const memoryMB = memoryPerUser * dau;
+      const memoryGB = memoryMB / 1024;
+
+      // 7. DB Sharding
+      const totalDbSizeGB = totalStorageGB; // Assume DB size ~= total storage
+      const shards = Math.ceil(totalDbSizeGB / maxShardSize);
+
+      // 8. HikariCP connection pool size (optimistic)
+      const poolSizeRaw = maxRpsPerServer / (avgDbQueryTime / 1000);
+      const poolSize = Math.min(Math.ceil(poolSizeRaw), 100);
+
+      // 9. AWS ECS Cluster sizing with resource constraints
+
+      // Estimate container resource needs:
+      // Assume each container supports maxRpsPerServer RPS
+      // We derive container CPU & RAM requirements based on VM specs and max containers per VM input
+
+      // Per container resource estimate (CPU cores and RAM GB):
+      // We divide VM resource by containers per VM to get per-container resource allocation
+      const containerCpu = vmVcpu / containersPerVM; // vCPU per container
+      const containerRam = vmRam / containersPerVM;   // GB RAM per container
+
+      // Total containers needed = serversNeeded (each server runs one container equivalent)
+      const totalContainers = vmWithRedundancy; // use redundancy included here
+
+      // Calculate cluster size considering VM resource constraints:
+      // Number of containers per VM limited by CPU and RAM resources
+      const maxContainersByCpu = Math.floor(vmVcpu / containerCpu);
+      const maxContainersByRam = Math.floor(vmRam / containerRam);
+      const maxContainersPerVmResource = Math.min(maxContainersByCpu, maxContainersByRam, containersPerVM);
+
+      const ecsClusterVMs = Math.ceil(totalContainers / maxContainersPerVmResource) + 1; // +1 for buffer
+
+      // 10. VM sizing without container orchestration (classic VM sizing)
+      // Just serversNeeded * redundancy factor to get VM count
+      const classicVmCount = vmWithRedundancy;
+
+      // Compose results HTML tables, section-wise
+
+      const reportHTML = `
+        <h3>📊 System Requirement Report</h3>
+
+        
+        <h5 class="mt-4">🔖 Assumptions</h5>
+        <ul>
+          <li>All users are active every day (DAU = total users per day).</li>
+          <li>Average object size is constant for all users and requests.</li>
+          <li>Retention period is in days; all data is retained for the full period.</li>
+          <li>Replication factor is applied to all stored data (full synchronous replication).</li>
+          <li>Network overhead is estimated at 20% for replication and protocol overhead.</li>
+          <li>All VMs and containers are fully utilized (no idle resources).</li>
+          <li>Database size is assumed to be approximately equal to total storage required.</li>
+          <li>HikariCP pool size is capped at 100 for practical connection management.</li>
+          <li>Redundancy factor (N+X) is applied to both storage and compute resources.</li>
+          <li>No data compression or deduplication is considered in storage calculations.</li>
+          <li>All calculations are for peak load (worst-case scenario).</li>
+          <li>Containers per VM are limited by both user input and available resources.</li>
+          <li>VM and container resource allocation is based on user-specified vCPU and RAM.</li>
+          <li>Sharding is based on total DB size divided by max shard size.</li>
+          <li>All calculations assume a homogeneous environment (identical VMs/containers).</li>
+        </ul>
+
+        <h5 class="mt-4">🔒 Storage Requirements</h5>
+        <table class="table table-bordered">
+          <tbody>
+            <tr><th style="width:75%">Daily Data Ingest<br><small class='text-muted'>(DAU × Avg Object Size)</small></th><td style="width:25%">${(dailyDataMB / 1024).toFixed(2)} GB</td></tr>
+            <tr><th style="width:75%">Total Storage (Retention)<br><small class='text-muted'>(Daily Data × Retention / 1024)</small></th><td style="width:25%">${totalStorageGB.toFixed(2)} GB</td></tr>
+            <tr><th style="width:75%">Replicated Storage<br><small class='text-muted'>(Total Storage × Replication Factor)</small></th><td style="width:25%">${replicatedStorageGB.toFixed(2)} GB</td></tr>
+            <tr><th style="width:75%">Storage with Redundancy (N+X)<br><small class='text-muted'>(Replicated Storage × Redundancy Factor)</small></th><td style="width:25%">${storageWithRedundancy.toFixed(2)} GB</td></tr>
+          </tbody>
+        </table>
+
+        <h5>🌐 Network Bandwidth</h5>
+        <table class="table table-bordered">
+          <tbody>
+            <tr><th style="width:75%">Estimated Upload Bandwidth<br><small class='text-muted'>(Upload/User × DAU × 8 / 86400)</small></th><td style="width:25%">${bandwidthMbps.toFixed(2)} Mbps</td></tr>
+            <tr><th style="width:75%">Network Overhead for Replication<br><small class='text-muted'>(Upload Bandwidth × 20%)</small></th><td style="width:25%">${networkOverheadMbps.toFixed(2)} Mbps</td></tr>
+            <tr><th style="width:75%">Total Network Bandwidth<br><small class='text-muted'>(Upload Bandwidth + Overhead)</small></th><td style="width:25%">${totalNetworkMbps.toFixed(2)} Mbps</td></tr>
+          </tbody>
+        </table>
+
+        <h5>🧠 Memory Usage</h5>
+        <table class="table table-bordered">
+          <tbody>
+            <tr><th style="width:75%">Memory per Session/User</th><td style="width:25%">${memoryPerUser} MB</td></tr>
+            <tr><th style="width:75%">Total Estimated Memory<br><small class='text-muted'>(Memory/User × DAU / 1024)</small></th><td style="width:25%">${memoryGB.toFixed(2)} GB</td></tr>
+          </tbody>
+        </table>
+
+        <h5>🖥️ Compute Resource (CPU & Servers)</h5>
+        <table class="table table-bordered">
+          <tbody>
+            <tr><th style="width:75%">Total RPS<br><small class='text-muted'>(DAU × Requests/User/Day / 86400)</small></th><td style="width:25%">${totalRps.toFixed(2)}</td></tr>
+            <tr><th style="width:75%">Read RPS (post-cache)<br><small class='text-muted'>(Total RPS × Read Ratio × (1 - Cache Hit Ratio))</small></th><td style="width:25%">${effectiveReadRps.toFixed(2)}</td></tr>
+            <tr><th style="width:75%">Write RPS<br><small class='text-muted'>(Total RPS × Write Ratio)</small></th><td style="width:25%">${writeRps.toFixed(2)}</td></tr>
+            <tr><th style="width:75%">Servers Needed (VMs)<br><small class='text-muted'>(Total Effective RPS / Max RPS per Server)</small></th><td style="width:25%">${serversNeeded}</td></tr>
+            <tr><th style="width:75%">VM Size (vCPU, RAM)</th><td style="width:25%">${vmVcpuNonContainer} vCPU, ${vmRamNonContainer} GB RAM</td></tr>
+            <tr><th style="width:75%">VMs with N+X Redundancy<br><small class='text-muted'>(Servers Needed × Redundancy Factor)</small></th><td style="width:25%">${classicVmCount}</td></tr>
+          </tbody>
+        </table>
+
+        <h5>🗃️ Database Scaling</h5>
+        <table class="table table-bordered">
+          <tbody>
+            <tr><th style="width:75%">DB Type</th><td style="width:25%">${dbType}</td></tr>
+            <tr><th style="width:75%">Sharding Strategy</th><td style="width:25%">${shardStrategy}</td></tr>
+            <tr><th style="width:75%">Estimated DB Size</th><td style="width:25%">${totalDbSizeGB.toFixed(2)} GB</td></tr>
+            <tr><th style="width:75%">Number of Shards<br><small class='text-muted'>(Total DB Size / Max Shard Size)</small></th><td style="width:25%">${shards}</td></tr>
+          </tbody>
+        </table>
+
+        <h5>⚙️ Spring Boot HikariCP Connection Pool</h5>
+        <table class="table table-bordered">
+          <tbody>
+            <tr><th style="width:75%">Average DB Query Time</th><td style="width:25%">${avgDbQueryTime} ms</td></tr>
+            <tr><th style="width:75%">Max RPS per Server</th><td style="width:25%">${maxRpsPerServer}</td></tr>
+            <tr><th style="width:75%">Calculated HikariCP Pool Size<br><small class='text-muted'>(Max RPS per Server / (Avg DB Query Time in seconds))</small></th><td style="width:25%">${poolSize}</td></tr>
+          </tbody>
+        </table>
+
+        <h5>☁️ AWS ECS Cluster Sizing</h5>
+        <table class="table table-bordered">
+          <tbody>
+            <tr><th style="width:75%">Total Containers Needed</th><td style="width:25%">${totalContainers}</td></tr>
+            <tr><th style="width:75%">Containers per VM (User Input)</th><td style="width:25%">${containersPerVM}</td></tr>
+            <tr><th style="width:75%">VM Specs (vCPU, RAM)</th><td style="width:25%">${vmVcpu} vCPU, ${vmRam} GB RAM</td></tr>
+            <tr><th style="width:75%">Estimated Containers per VM (resource constrained)</th><td style="width:25%">${maxContainersPerVmResource}</td></tr>
+            <tr><th style="width:75%">Calculated AWS ECS Cluster VM Count<br><small class='text-muted'>(Total Containers / Containers per VM)</small></th><td style="width:25%">${ecsClusterVMs}</td></tr>
+          </tbody>
+        </table>
+
+        <h5>⚠️ Notes on Availability and Reliability</h5>
+        <ul>
+          <li>Availability Zones: ${availabilityZones}</li>
+          <li>Redundancy Factor used: ${redundancyFactor}</li>
+          <li>Backup Frequency: Every ${backupFrequency} days</li>
+          <li>Disaster Recovery RPO: ${rpo} hours</li>
+        </ul>
+      `;
+
+      document.getElementById("pdfReport").innerHTML = reportHTML;
+    }
+
+    function downloadPdf() {
+      const element = document.getElementById("pdfReport");
+      if (!element.innerHTML.trim()) {
+        alert("Please run the calculation first.");
+        return;
+      }
+      const opt = {
+        margin: 0.5,
+        filename: "system-requirement-report.pdf",
+        image: { type: "jpeg", quality: 0.98 },
+        html2canvas: { scale: 2 },
+        jsPDF: { unit: "in", format: "letter", orientation: "portrait" },
+      };
+      html2pdf().set(opt).from(element).save();
+    }
+
+    function downloadCsv() {
+      const element = document.getElementById("pdfReport");
+      if (!element.innerHTML.trim()) {
+        alert("Please run the calculation first.");
+        return;
+      }
+      // Find all tables in the report
+      const tables = element.querySelectorAll('table');
+      let csvRows = [["Parameter (with formula)", "Value"]];
+      tables.forEach(table => {
+        const rows = table.querySelectorAll('tbody tr');
+        rows.forEach(row => {
+          const th = row.querySelector('th');
+          const td = row.querySelector('td');
+          if (th && td) {
+            // Remove HTML tags and line breaks from th
+            let param = th.innerText.replace(/\n/g, ' ').replace(/\s+/g, ' ').trim();
+            let value = td.innerText.replace(/\n/g, ' ').replace(/\s+/g, ' ').trim();
+            csvRows.push([param, value]);
+          }
+        });
+      });
+      // Convert to CSV string
+      const csvContent = csvRows.map(row => row.map(cell => '"' + cell.replace(/"/g, '""') + '"').join(",")).join("\r\n");
+      // Download
+      const blob = new Blob([csvContent], { type: 'text/csv' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'system-requirement-report.csv';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    }
+  </script>
+</body>
+</html>
